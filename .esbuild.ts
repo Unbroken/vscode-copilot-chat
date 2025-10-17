@@ -3,7 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as watcher from '@parcel/watcher';
 import * as esbuild from 'esbuild';
 import * as fs from 'fs';
 import { copyFile, mkdir } from 'fs/promises';
@@ -14,13 +13,37 @@ const REPO_ROOT = import.meta.dirname;
 const isWatch = process.argv.includes('--watch');
 const isDev = process.argv.includes('--dev');
 const isPreRelease = process.argv.includes('--prerelease');
+const outputRootIndex = process.argv.indexOf('--outputRoot');
+const outputRoot = outputRootIndex !== -1 ? process.argv[outputRootIndex + 1] : undefined;
+
+/**
+ * @type {esbuild.Plugin}
+ */
+const esbuildProblemMatcherPlugin: esbuild.Plugin = {
+	name: 'esbuild-problem-matcher',
+
+	setup(build) {
+		build.onStart(() => {
+			console.log('[watch] build started');
+		});
+		build.onEnd(result => {
+			result.errors.forEach(({ text, location }) => {
+				if (location)
+					console.error(`> ${location.file}:${location.line}:${location.column}: error: ${text}`);
+				else
+					console.error(`> unknown: error: ${text}`);
+			});
+			console.log('[watch] build finished');
+		});
+	}
+};
 
 const baseBuildOptions = {
 	bundle: true,
 	logLevel: 'info',
 	minify: !isDev,
-	outdir: './dist',
-	sourcemap: isDev ? 'linked' : false,
+	outdir: outputRoot ? path.join(outputRoot, 'dist') : './dist',
+	sourcemap: true,
 	sourcesContent: false,
 	treeShaking: true
 } satisfies esbuild.BuildOptions;
@@ -28,7 +51,7 @@ const baseBuildOptions = {
 const baseNodeBuildOptions = {
 	...baseBuildOptions,
 	external: [
-		'./package.json',
+		...(isWatch ? ['./package.json'] : []), // Only external in watch mode, bundle in production
 		'./.vscode-test.mjs',
 		'playwright',
 		'keytar',
@@ -188,7 +211,7 @@ const nodeExtHostBuildOptions = {
 		{ in: './src/sanity-test-extension.ts', out: 'sanity-test-extension' },
 	],
 	loader: { '.ps1': 'text' },
-	plugins: [testBundlePlugin, sanityTestBundlePlugin, importMetaPlugin],
+	plugins: [testBundlePlugin, sanityTestBundlePlugin, importMetaPlugin, esbuildProblemMatcherPlugin],
 	external: [
 		...baseNodeBuildOptions.external,
 		'vscode'
@@ -205,12 +228,13 @@ const webExtHostBuildOptions = {
 	external: [
 		'vscode',
 		'http',
-	]
+	],
+	plugins: [esbuildProblemMatcherPlugin]
 } satisfies esbuild.BuildOptions;
 
 const nodeExtHostSimulationTestOptions = {
 	...nodeExtHostBuildOptions,
-	outdir: '.vscode/extensions/test-extension/dist',
+	outdir: outputRoot ? path.join(outputRoot, '.vscode/extensions/test-extension/dist') : '.vscode/extensions/test-extension/dist',
 	entryPoints: [
 		{ in: '.vscode/extensions/test-extension/main.ts', out: './simulation-extension' }
 	]
@@ -221,7 +245,7 @@ const nodeSimulationBuildOptions = {
 	entryPoints: [
 		{ in: './test/simulationMain.ts', out: 'simulationMain' },
 	],
-	plugins: [testBundlePlugin, shimVsCodeTypesPlugin],
+	plugins: [testBundlePlugin, shimVsCodeTypesPlugin, esbuildProblemMatcherPlugin],
 	external: [
 		...baseNodeBuildOptions.external,
 	]
@@ -250,12 +274,16 @@ const nodeSimulationWorkbenchUIBuildOptions = {
 		'http',
 		'assert',
 	],
+	plugins: [esbuildProblemMatcherPlugin]
 } satisfies esbuild.BuildOptions;
 
 async function typeScriptServerPluginPackageJsonInstall(): Promise<void> {
-	await mkdir('./node_modules/@vscode/copilot-typescript-server-plugin', { recursive: true });
+	const targetDir = outputRoot
+		? path.join(outputRoot, 'node_modules/@vscode/copilot-typescript-server-plugin')
+		: path.join(import.meta.dirname, './node_modules/@vscode/copilot-typescript-server-plugin');
+	await mkdir(targetDir, { recursive: true });
 	const source = path.join(import.meta.dirname, './src/extension/typescriptContext/serverPlugin/package.json');
-	const destination = path.join(import.meta.dirname, './node_modules/@vscode/copilot-typescript-server-plugin/package.json');
+	const destination = path.join(targetDir, 'package.json');
 	try {
 		await copyFile(source, destination);
 	} catch (error) {
@@ -269,9 +297,9 @@ const typeScriptServerPluginBuildOptions = {
 	// keepNames: true,
 	logLevel: 'info',
 	minify: !isDev,
-	outdir: './node_modules/@vscode/copilot-typescript-server-plugin/dist',
+	outdir: outputRoot ? path.join(outputRoot, 'node_modules/@vscode/copilot-typescript-server-plugin/dist') : './node_modules/@vscode/copilot-typescript-server-plugin/dist',
 	platform: 'node',
-	sourcemap: isDev ? 'linked' : false,
+	sourcemap: true,
 	sourcesContent: false,
 	treeShaking: true,
 	external: [
@@ -280,12 +308,13 @@ const typeScriptServerPluginBuildOptions = {
 	],
 	entryPoints: [
 		{ in: './src/extension/typescriptContext/serverPlugin/src/node/main.ts', out: 'main' },
-	]
+	],
+	plugins: [esbuildProblemMatcherPlugin]
 } satisfies esbuild.BuildOptions;
 
 async function main() {
 	if (!isDev) {
-		applyPackageJsonPatch(isPreRelease);
+		//applyPackageJsonPatch(isPreRelease);
 	}
 
 	await typeScriptServerPluginPackageJsonInstall();
@@ -320,7 +349,6 @@ async function main() {
 			}
 
 			debounce = setTimeout(async () => {
-				console.log('[watch] build started');
 				for (const ctx of contexts) {
 					try {
 						await ctx.cancel();
@@ -329,10 +357,10 @@ async function main() {
 						console.error('[watch]', error);
 					}
 				}
-				console.log('[watch] build finished');
 			}, 100);
 		};
 
+		const watcher = await import('@parcel/watcher');
 
 		watcher.subscribe(REPO_ROOT, (err, events) => {
 			for (const event of events) {
