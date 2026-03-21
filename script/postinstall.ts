@@ -92,6 +92,22 @@ async function copyCopilotCLIFolders(sourceDir: string, targetDir: string) {
 	await fs.promises.cp(sourceDir, targetDir, { recursive: true, force: true });
 }
 
+/**
+ * Patch @vscode/debugprotocol to use 'namespace' instead of 'module' keyword.
+ * The package (v1.68.0, latest) uses `export declare module DebugProtocol`
+ * which triggers TS1540 with tsgo. Replace with `export declare namespace`.
+ */
+async function patchDebugProtocol() {
+	const filePath = path.join(REPO_ROOT, 'node_modules', '@vscode', 'debugprotocol', 'lib', 'debugProtocol.d.ts');
+	if (fs.existsSync(filePath)) {
+		const content = await fs.promises.readFile(filePath, 'utf-8');
+		const patched = content.replace('export declare module DebugProtocol {', 'export declare namespace DebugProtocol {');
+		if (patched !== content) {
+			await fs.promises.writeFile(filePath, patched, 'utf-8');
+		}
+	}
+}
+
 async function main() {
 	await fs.promises.mkdir(path.join(REPO_ROOT, '.build'), { recursive: true });
 
@@ -121,6 +137,8 @@ async function main() {
 	await copyStaticAssets([
 		`node_modules/@anthropic-ai/claude-agent-sdk/cli.js`,
 	], 'dist');
+
+	await patchDebugProtocol();
 }
 
 main();
