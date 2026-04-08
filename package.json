@@ -3037,6 +3037,11 @@
 						"default": true,
 						"markdownDescription": "%github.copilot.config.claudeAgent.enabled%"
 					},
+					"github.copilot.chat.claudeAgent.sessions.enabled": {
+						"type": "boolean",
+						"default": false,
+						"markdownDescription": "%github.copilot.config.claudeAgent.sessions.enabled%"
+					},
 					"github.copilot.chat.claudeAgent.allowDangerouslySkipPermissions": {
 						"type": "boolean",
 						"default": false,

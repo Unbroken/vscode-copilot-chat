@@ -27,6 +27,7 @@
  */
 
 import type { CancellationToken } from 'vscode';
+import { ConfigKey, IConfigurationService } from '../../../../../platform/configuration/common/configurationService';
 import { INativeEnvService } from '../../../../../platform/env/common/envService';
 import { IFileSystemService } from '../../../../../platform/filesystem/common/fileSystemService';
 import { FileType } from '../../../../../platform/filesystem/common/fileTypes';
@@ -129,6 +130,7 @@ export class ClaudeCodeSessionService implements IClaudeCodeSessionService {
 	private _lastParseStats: ParseStats | undefined;
 
 	constructor(
+		@IConfigurationService private readonly _configurationService: IConfigurationService,
 		@IFileSystemService private readonly _fileSystem: IFileSystemService,
 		@ILogService private readonly _logService: ILogService,
 		@IWorkspaceService private readonly _workspace: IWorkspaceService,
@@ -140,6 +142,10 @@ export class ClaudeCodeSessionService implements IClaudeCodeSessionService {
 	 * Get lightweight metadata for all sessions in the current workspace.
 	 */
 	async getAllSessions(token: CancellationToken): Promise<readonly IClaudeCodeSessionInfo[]> {
+		if (!this._configurationService.getConfig(ConfigKey.ClaudeAgentSessionsEnabled)) {
+			return [];
+		}
+
 		const items: IClaudeCodeSessionInfo[] = [];
 		const projectFolders = await this._getProjectFolders();
 
@@ -171,6 +177,10 @@ export class ClaudeCodeSessionService implements IClaudeCodeSessionService {
 	 * Get a specific session with full content by its resource URI.
 	 */
 	async getSession(resource: URI, token: CancellationToken): Promise<IClaudeCodeSession | undefined> {
+		if (!this._configurationService.getConfig(ConfigKey.ClaudeAgentSessionsEnabled)) {
+			return undefined;
+		}
+
 		// Check full session cache with mtime-based freshness
 		const cached = this._fullSessionCache.get(resource);
 		if (cached !== undefined) {
